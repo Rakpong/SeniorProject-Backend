@@ -1,3 +1,6 @@
 
 venv/*
 /__pycache__/*
+not_use/Test/*
+not_use/function/Fire video/*
+/app/__pycache__/*
