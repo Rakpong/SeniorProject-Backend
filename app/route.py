@@ -7,13 +7,15 @@ import numpy as np
 import cv2
 from app import app
 import os
-from flask import flash, render_template, redirect, request, Response, send_file , jsonify
+from flask import flash, render_template, redirect, request, Response, send_from_directory , jsonify, url_for
 from werkzeug.utils import secure_filename
 
 ALLOWED_EXTENSIONS = set(['mp4', 'wmv'])
 upload_folder = 'F:/workkk/SeniorProject-Backend/app/upload_video'
 models = tf.keras.models.load_model('F:/workkk/SeniorProject-Backend/app/model')
-# Predictions = []
+# smoke_frame_number = -1
+Predictions = []
+
 
 @app.route("/")
 def upload():
@@ -28,14 +30,17 @@ def display():
 
 @app.route('/grad', methods=['GET'])
 def sendfile():
-    grad_path = "F:/workkk/SeniorProject-Backend/app/grad_cam/grad.jpg"
-    return send_file(grad_path, mimetype='image/jpg')
+    # grad_path = "F:/workkk/SeniorProject-Backend/app/grad_cam/grad.jpg"
+    # grad_path = grad_cam(models, smoke_frame_number)
+    # return send_from_directory(grad_path, mimetype='image/jpg')
+    return url_for('static',filename='grad.jpg')
 
 @app.route('/upload', methods=['POST'])
 # def reloadpage():
 #     return render_template('upload.html',predictions = Predictions)
 def upload_file():
     import numpy as np
+    import base64
     if request.method == 'POST':
         file = request.files['file']
         if file.filename == '':
@@ -45,33 +50,38 @@ def upload_file():
             filename = secure_filename(file.filename)
             file.save(os.path.join(upload_folder, filename))
             status_code = Response(status=200)
-
-            Time_per_frame, video_path, frame_path = extract_frame()
+            Time_per_frame =[0.00]
+            Time_per_frame, video_path, frame_path = extract_frame(Time_per_frame)
             
             Result_per_frame = predict(models)
             # for i in range(3):
             #     Result_per_frame[i] = "normal"
-            # print(Result_per_frame)
+            print(Result_per_frame,Time_per_frame)
             smoke_frame_number = checkSmoke(Result_per_frame)
-            # print(smoke_frame_number)
+            
+            print(smoke_frame_number)
             if(smoke_frame_number == -1):
+                normal_detect = grad_cam(models, -1)
                 remove_video(video_path)
                 remove_frame(frame_path)
                 data = {
-                    'time' : '[None,]',
+                    'result': 'None,',
+                    'time' : 'None,',
                     'gradcam': 'None',
                     'status_code' : '200'
                 }
                 return jsonify(data)
             else:
+                # Predictions = str(Result_per_frame[smoke_frame_number:])
+                # Time = str(Time_per_frame[smoke_frame_number:])
                 grad_path = grad_cam(models, smoke_frame_number)
                 remove_video(video_path)
                 remove_frame(frame_path)
-                # Predictions = str(Result_per_frame[smoke_frame_number:])
-                Time = str(Time_per_frame[smoke_frame_number:])
-                print(Time)
+                # print(grad_path)
+                # base64.b64decode(grad_path)
                 data = {
-                    'time'  : Time,
+                    'result': Result_per_frame,
+                    'time'  : Time_per_frame,
                     'gradcam' : grad_path.decode(),
                     'status_code' : '200'
                 }
@@ -81,7 +91,7 @@ def upload_file():
             return status_code
 
 
-def extract_frame():
+def extract_frame(time):
     import numpy as np
     source = "F:/workkk/SeniorProject-Backend/app/upload_video/"
     video = os.listdir(source)
@@ -95,11 +105,10 @@ def extract_frame():
     count = 0
     target_folder = "F:/workkk/SeniorProject-Backend/app/video_frame/"
     os.chdir(target_folder)
-    time = []
     while success:
         if(count > 0):
             cap.set(cv2.CAP_PROP_POS_MSEC, (count*gap_time*35))
-            cv2.imwrite("frame%d.jpg" % count, image)
+            cv2.imwrite("frame%2d.jpg" % count, image)
             time.append( round ( (count*gap_time*35) * 0.001 ,2) )
             # print((count*gap_time*35) * 0.001)
             success, image = cap.read()
@@ -108,7 +117,7 @@ def extract_frame():
     os.chdir("F:/workkk/SeniorProject-Backend/app/")
     # os.remove(source+video[0])
     # print("Video Removed!")
-    return time, source+video[0], target_folder
+    return time[:len(time)-1], source+video[0], target_folder
 
 def remove_video(path):
     os.remove(path)
@@ -151,6 +160,7 @@ def grad_cam(models, frame_number):
     import base64
     model = models
     source = "F:/workkk/SeniorProject-Backend/app/video_frame/"
+    print(frame_number)
     frame = os.listdir(source)
 
     def make_gradcam_heatmap(
@@ -185,7 +195,12 @@ def grad_cam(models, frame_number):
         "top_dropout",
         "pred",
     ]
-    img_path = source + frame[frame_number]
+    if(frame_number == -1):
+        img_path = source + frame[0]
+    else:
+        img_path = source + frame[frame_number]
+    print(frame)
+    print(img_path)
     img = keras.preprocessing.image.load_img(img_path, target_size=(224, 224))
     input_arr = keras.preprocessing.image.img_to_array(img)
     input_arr = np.array([input_arr])  # Convert single image to a batch.
@@ -206,7 +221,11 @@ def grad_cam(models, frame_number):
     jet_heatmap = keras.preprocessing.image.img_to_array(jet_heatmap)
     superimposed_img = jet_heatmap * 0.4 + img
     superimposed_img = keras.preprocessing.image.array_to_img(superimposed_img)
-    save_path = "F:/workkk/SeniorProject-Backend/app/grad_cam/grad.jpg"
+
+    # if(frame_number == -1):
+    #     save_path = "F:/workkk/SeniorProject-Backend/app/not_use/grad.jpg"
+    # else:
+    save_path = "F:/workkk/SeniorProject-Backend/app/static/grad.jpg"
     superimposed_img.save(save_path)
     with open(save_path, "rb") as imageFile:
         str = base64.b64encode(imageFile.read())
